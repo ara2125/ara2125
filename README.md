@@ -13,13 +13,12 @@
 ---
 
 ### 🚀 Featured Projects
-- **[Fractal Plant Growth Game](link)** - Interactive embedded system with VGA graphics and multi-threading
-- **[Hardware Neuron Implementation](link)** - VLSI circuit design with Python neural network validation
-- **[More projects in my repositories](link)**
+- **Fractal Plant Growth Game** - Interactive embedded system with VGA graphics and multi-threading
+- **Hardware Neuron Implementation** - VLSI circuit design with Python neural network validation
 
 ### 📫 Let's connect!
 - 📧 ara89@cornell.edu
-- 💼 [LinkedIn](your-linkedin-url)
+- 💼 [LinkedIn](https://www.linkedin.com/in/asma-ansari-156011225/)
 <!---
 ara2125/ara2125 is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 You can click the Preview link to take a look at your changes.
