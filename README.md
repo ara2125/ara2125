@@ -1,8 +1,25 @@
-- 👋 Hi, I’m Asma!
-- 👀 I’m interested in embedded systems, power electronics, and sustainability!
-- 🌱 I’m currently learning more about digital/analog circuit design and microelectronics/nanotechnology. My goal is to become an expert in these areas. 
-- ⚡ Fun fact: I have been rollerblading since I was 10-years-old!
+## 👋 Hi, I'm Asma!
 
+🎓 **Electrical & Computer Engineering Student at Cornell University** (Graduating May 2025)
+
+🔧 **Passionate about:** Embedded systems, VLSI design, machine learning, and sustainable technology
+
+🌱 **Currently exploring:** Digital/analog circuit design, microelectronics, and AI hardware acceleration
+
+💼 **Experience:** Machine learning internship, sustainable tech startup founder, energy optimization research
+
+⚡ **Fun fact:** I've been rollerblading since I was 10 years old!
+
+---
+
+### 🚀 Featured Projects
+- **[Fractal Plant Growth Game](link)** - Interactive embedded system with VGA graphics and multi-threading
+- **[Hardware Neuron Implementation](link)** - VLSI circuit design with Python neural network validation
+- **[More projects in my repositories](link)**
+
+### 📫 Let's connect!
+- 📧 ara89@cornell.edu
+- 💼 [LinkedIn](your-linkedin-url)
 <!---
 ara2125/ara2125 is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 You can click the Preview link to take a look at your changes.
