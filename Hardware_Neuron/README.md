@@ -1,0 +1,7 @@
+# Neuron & Neural Network Simulation Using Cadence & Python
+
+This final project aims to implement a neuron in Cadence and simulate the performance of this neuron through a neural network processing a simple task. In Cadence, we designed the neuron such that it takes in 3 inputs (a value and its weights) and processes this information to activate (or deactivate) that neuron. The neuron consists of a state machine which cycles through the inputs at each clock cycle, a MAC unit, and a ReLU to determine whether the neuron is activated.
+
+To supplement Cadence simulation results related to power and delay, we designed a neural network that XORs the inputs and attempts to predict the output accurately. This neural network contains back propagation which allows us to see how the weights for each input transform over time. We developed two Python classes, one representing our hardware neuron and one that is a neural network containing these "physical" neurons. Ultimately, our "physical" neural network delivers performance results in terms of power, delay, number of MAC/ReLU activations, and number of "physical" neurons used (as well as number of inferences). 
+
+Authors: Wali Afridi, Asma Ansari, Demetrios Gavalas, Simeon Turner
