@@ -1,6 +1,6 @@
 ## 👋 Hi, I'm Asma!
 
-🎓 **Electrical & Computer Engineering Student at Cornell University** (Graduating May 2025)
+🎓 **Cornell University - B.S. in Electrical & Computer Engineering '25**
 
 🔧 **Passionate about:** Embedded systems, VLSI design, machine learning, and sustainable technology
 
