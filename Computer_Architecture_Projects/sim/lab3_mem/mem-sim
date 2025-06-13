@@ -1,0 +1,700 @@
+#!/usr/bin/env python
+#=========================================================================
+# mem-sim [options]
+#=========================================================================
+#
+#  -h --help           Display this message
+#  -v --verbose        Verbose mode
+#
+#  --impl impl         {fl,base,alt}
+#  --input dataset     {loop1,loop2,loop3}
+#  --trace             Display line tracing
+#  --stats             Display statistics
+#  --dump-vcd          Dump VCD to mem-impl-input.vcd
+#  --mem-lat           Set memory latency (in cycles), default=20
+#
+# The three datasets correspond to the following cache access patterns:
+#
+#   loop1:
+#     a array allocated at 0x1000
+#     for ( i = 0; i < 100; i++ )
+#       result += a[i];
+#
+#   loop2:
+#     a array allocated at 0x1000
+#     b array allocated at 0x2000
+#     for ( i = 0; i < 100; i ++ )
+#       result += a[i]*b[i]
+#
+#   loop3
+#     a array allocated at 0x1000
+#     b array allocated at 0x2000
+#     c array allocated at 0x3080
+#     for ( i = 0; i < 100; i ++ )
+#       result += a[i]*b[i] + c[i]
+#
+# Author : Shreesha Srinath, Moyang Wang, Christopher Batten
+# Date   : October 8, 2015, updated October 31, 2022
+#
+
+# Hack to add project root to python path
+
+import os
+import sys
+from random import seed, randint
+
+seed(0xa4e28cc2)
+
+sim_dir = os.path.dirname( os.path.abspath( __file__ ) )
+while sim_dir:
+  if os.path.exists( sim_dir + os.path.sep + "pymtl.ini" ):
+    sys.path.insert(0,sim_dir)
+    break
+  sim_dir = os.path.dirname(sim_dir)
+
+import argparse
+import re
+
+from pymtl3 import *
+from pymtl3.stdlib.test_utils import config_model_with_cmdline_opts
+from pymtl3.passes.backends.verilog import VerilogPlaceholderPass
+
+from lab3_mem.CacheFL   import CacheFL
+from lab3_mem.CacheBase import CacheBase
+from lab3_mem.CacheAlt  import CacheAlt
+
+from lab3_mem.test.harness import req, resp, run_test
+from lab3_mem.test.harness import TestHarness
+from lab3_mem.test.CacheFL_test import cmp_wo_test_field
+
+#-------------------------------------------------------------------------
+# Command line processing
+#-------------------------------------------------------------------------
+
+class ArgumentParserWithCustomError(argparse.ArgumentParser):
+  def error( s, msg = "" ):
+    if ( msg ): print("\n ERROR: %s" % msg)
+    print("")
+    file = open( sys.argv[0] )
+    for ( lineno, line ) in enumerate( file ):
+      if ( line[0] != '#' ): sys.exit(msg != "")
+      if ( (lineno == 2) or (lineno >= 4) ): print( line[1:].rstrip("\n") )
+
+def parse_cmdline():
+  p = ArgumentParserWithCustomError( add_help=False )
+
+  # Standard command line arguments
+
+  p.add_argument( "-v", "--verbose",  action="store_true"                         )
+  p.add_argument( "-h", "--help",     action="store_true"                         )
+  p.add_argument(       "--impl",     choices=["fl","base", "alt"], default="fl"  )
+
+  p.add_argument(       "--input",    choices=["loop1", "loop2", "loop3", "loop4","loop5","loop6","loop7","loop8","loop9","loop10","loop11"], default="loop1" )
+  p.add_argument(       "--trace",    action="store_true"                                          )
+  p.add_argument(       "--stats",    action="store_true"                                          )
+  p.add_argument(       "--dump-vcd", action="store_true"                                          )
+  p.add_argument(       "--mem-lat",  type=int,                                  default=20        )
+
+  opts = p.parse_args()
+  if opts.help: p.error()
+  return opts
+
+#-------------------------------------------------------------------------
+# Pattern: loop1
+#-------------------------------------------------------------------------
+# High spatial locality Low temporal locality
+# for ( i = 0; i < 100; i++ )
+#   result += a[i]
+
+def loop1():
+
+  # return memory message
+
+  mem = []
+
+  for i in range( 100 ):
+    mem.append( 0x00001000+i*4 )
+    mem.append( 0xabcd1000+i*4 )
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range( 100 ):
+    imsgs.append( req ( 'rd', i, 0x00001000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd1000+i*4 ) )
+
+  return [ imsgs, omsgs, mem ]
+
+#-------------------------------------------------------------------------
+# Pattern: loop2
+#-------------------------------------------------------------------------
+# High spatial locality Low temporal locality
+# for ( i = 0; i < 100; i++ )
+#   result += a[i]*b[i]
+
+def loop2():
+
+  # return memory message
+
+  mem = []
+
+  for i in range( 100 ):
+    mem.append( 0x00001000+i*4 )
+    mem.append( 0xabcd1000+i*4 )
+
+  for i in range( 100 ):
+    mem.append( 0x00002000+i*4 )
+    mem.append( 0xabcd2000+i*4 )
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range( 100 ):
+    imsgs.append( req ( 'rd', i, 0x00001000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd1000+i*4 ) )
+    imsgs.append( req ( 'rd', i, 0x00002000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd2000+i*4 ) )
+
+  return [ imsgs, omsgs, mem ]
+
+#-------------------------------------------------------------------------
+# Pattern: loop3
+#-------------------------------------------------------------------------
+# High spatial locality Low temporal locality
+# for ( i = 0; i < 100; i++ )
+#   result += a[i]*b[i] + c[i]
+
+def loop3():
+
+  # return memory message
+
+  mem = []
+
+  for i in range( 100 ):
+    mem.append( 0x00001000+i*4 )
+    mem.append( 0xabcd1000+i*4 )
+
+  for i in range( 100 ):
+    mem.append( 0x00002000+i*4 )
+    mem.append( 0xabcd2000+i*4 )
+
+  for i in range( 100 ):
+    mem.append( 0x00003080+i*4 )
+    mem.append( 0xabcd3080+i*4 )
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range( 100 ):
+    imsgs.append( req ( 'rd', i, 0x00001000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd1000+i*4 ) )
+    imsgs.append( req ( 'rd', i, 0x00002000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd2000+i*4 ) )
+    imsgs.append( req ( 'rd', i, 0x00003080+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd3080+i*4 ) )
+
+  return [ imsgs, omsgs, mem ]
+
+#-------------------------------------------------------------------------
+# Pattern: loop4
+#-------------------------------------------------------------------------
+# High spatial locality Low temporal locality
+# for ( i = 0; i < 100; i++ )
+#   a[i] = a[i]+b[i]
+
+
+def loop4():
+
+  # return memory message
+
+  mem = []
+
+  for i in range( 100 ):
+    result_a = 0xabcd1000+i*4
+    mem.append( 0x00001000+i*4 )
+    mem.append( result_a )
+
+  for i in range( 100 ):
+    result_b = 0x00022000+i*4
+    mem.append( 0x00002000+i*4 )
+    mem.append( result_b )
+
+  # result_add = 0xabcd1000+i*4 + 0x00022000+i*4
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range( 100 ):
+    imsgs.append( req ( 'rd', i, 0x00001000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd1000+i*4 ) )
+    imsgs.append( req ( 'rd', i, 0x00002000+i*4, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0x00022000+i*4 ) )
+    imsgs.append( req ( 'wr', i, 0x00001000+i*4, 0, (0xabcd1000+i*4)+(0x00022000+i*4) ) )
+    omsgs.append( resp( 'wr', i, 0, 0, 0 ) )
+
+  return [ imsgs, omsgs, mem ]
+
+#-------------------------------------------------------------------------
+# Pattern: loop5
+#-------------------------------------------------------------------------
+# High spatial locality Low temporal locality
+# Simulating 2D array access in a 1D array
+# for (i = 0; i < 100; i++) 
+#   for (j = 0; j < 4; j++) 
+#     result = a[i * 4 + j]
+
+def loop5():
+
+  # return memory message
+
+  mem = []
+  
+  # Each outer loop advances in 16-byte steps
+  # e.g. a[0] = 0xabcd1000, a[1] = 0xabcd1004, a[2] = 0xabcd1008, a[3] = 0xabcd100c
+  # e.g. a[4] = 0xabcd1010, a[5] = 0xabcd1014, a[6] = 0xabcd1018, a[7] = 0xabcd101c
+
+  for i in range(20):
+    base_addr = 0x00001000 + i * 16  
+    for j in range(4):
+      result_a = 0xabcd1000 + (i * 4 + j) * 4
+      mem.append(base_addr + j * 4)
+      mem.append(result_a)
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range(20):
+    base_addr = 0x00001000 + i * 16
+    for j in range(4):
+      addr = base_addr + j * 4
+      data = 0xabcd1000 + (i * 4 + j) * 4
+      imsgs.append(req('rd', j, addr, 0, 0))
+      omsgs.append(resp('rd',j, 0, 0, data))
+
+  return [imsgs, omsgs, mem]
+
+#-------------------------------------------------------------------------
+# Pattern: loop6
+#-------------------------------------------------------------------------
+# High spatial locality, Low temporal locality
+# for (i = 0; i < 100; i++) 
+#  if a[i*4] < b[i*4] (always true)
+#     a[i*4] = a[i*4] + 1
+
+def loop6():
+
+  # return memory message
+
+  mem = []
+  
+  # Each outer loop advances in 16-byte steps
+  # e.g. a[0] = 0x0bcd1000, a[4] = 0x0bcd1010, a[8] = 0x0bcd1020, a[16] = 0x0bcd1030
+  # e.g. b[0] = 0xabcd1010, b[4] = 0xabcd1014, b[8] = 0xabcd1018, b[16] = 0xabcd101c
+
+  for i in range(400):
+    result_a = 0x0bcd1000+i*4
+    mem.append( 0x00001000+i*4 )
+    mem.append( result_a )
+
+  for i in range(400):
+    result_b = 0xabcd1000+i*4
+    mem.append( 0x00005000+i*4 )
+    mem.append( result_b )
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range( 100 ):
+    imsgs.append( req ( 'rd', i, 0x00001000+i*16, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0x0bcd1000+i*16 ) )
+    imsgs.append( req ( 'rd', i, 0x00005000+i*16, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0xabcd1000+i*16 ) )
+    imsgs.append( req ( 'wr', i, 0x00001000+i*16, 0, 0x0bcd1000+i*16+1 ) )
+    omsgs.append( resp( 'wr', i, 0, 0, 0 ) )
+
+  return [ imsgs, omsgs, mem ]
+
+#-------------------------------------------------------------------------
+# Pattern: loop7
+#-------------------------------------------------------------------------
+# High spatial locality, Low temporal locality
+# base on loop 7, but use random num in b array
+# for (i = 0; i < 100; i++) 
+#  if a[i*4] < b[i*4] 
+#     a[i*4] = a[i*4] + 1
+
+def loop7():
+
+  # return memory message
+
+  mem = []
+  
+  # Each outer loop advances in 16-byte steps
+  # e.g. a[0] = 0xfffffff, a[4] = 0xfffffff, a[8] = 0xfffffff, a[16] = 0xfffffff
+  # e.g. b[0] = ?, b[4] = ?, b[8] = ?, b[16] = ?
+
+  for i in range(400):
+    result_a = 0x7fffffff
+    mem.append( 0x00001000+i*4 )
+    mem.append( result_a )
+
+  for i in range(400):
+    result_b = randint(0, 0xffffffff)
+    mem.append( 0x00005000+i*4 )
+    mem.append( result_b )
+
+  # return src/sink message
+
+  imsgs = []
+  omsgs = []
+
+  for i in range( 100 ):
+    imsgs.append( req ( 'rd', i, 0x00001000+i*16, 0, 0 ) )
+    omsgs.append( resp( 'rd', i, 0, 0, 0x7fffffff ) )
+    if 0x7fffffff < mem[2*400 + i*4*2+1]:
+      imsgs.append( req ( 'rd', i, 0x00005000+i*16, 0, 0 ) )
+      omsgs.append( resp( 'rd', i, 0, 0, mem[2*400 + i*4*2+1] ) )
+      imsgs.append( req ( 'wr', i, 0x00001000+i*16, 0, 0x7fffffff+i*16+1 ) )
+      omsgs.append( resp( 'wr', i, 0, 0, 0 ) )
+
+  return [ imsgs, omsgs, mem ]
+
+#-------------------------------------------------------------------------
+# Pattern: loop8
+#-------------------------------------------------------------------------
+# High temporal locality, Low spatial locality
+# for (i = 0; i < 100; i++) 
+#   read a[0], read b[0], write a[1], write b[1]
+
+def loop8():
+    
+    mem = []
+    
+    # Random or fixed small number of non-contiguous addresses
+    addresses = [0x1000, 0x2000, 0x1004, 0x2004]
+    data = [0x0000aaaa, 0x0000bbbb, 0x0000cccc, 0x0000dddd]
+    
+    for i, addr in enumerate(addresses):
+        mem.append(addr)
+        mem.append(data[i])
+    
+    imsgs = []
+    omsgs = []
+    
+    for _ in range(100):
+      imsgs.append(req('rd', i, addresses[0], 0, 0))
+      omsgs.append(resp('rd', i, 0, 0, data[0]))
+      imsgs.append(req('rd', i, addresses[1], 0, 0))
+      omsgs.append(resp('rd', i, 0, 0, data[1]))
+      imsgs.append(req('wr', i, addresses[2], 0, data[2]))
+      omsgs.append(resp('wr', i, 0, 0, 0))
+      imsgs.append(req('wr', i, addresses[3], 0, data[3]))
+      omsgs.append(resp('wr', i, 0, 0, 0))
+    
+    return [imsgs, omsgs, mem]
+
+#-------------------------------------------------------------------------
+# Pattern: loop9
+#-------------------------------------------------------------------------
+# Mixed spatial locality and temporal locality
+# for (i = 0; i < 100; i++) 
+#   read a[0], read a[1], read[2], read [3] 
+#   write b[0], write b[1], write b[2], write b[3]
+
+def loop9():
+
+    mem = []
+    data = [0xabcd1000, 0xabcd1004, 0xabcd1008, 0xabcd100c, 0xabcd2000, 0xabcd2004, 0xabcd2008, 0xabcd200c]
+    addresses = [0x1000, 0x1004, 0x1008, 0x100c, 0x2000, 0x2004, 0x2008, 0x200c]
+
+    for i, addr in enumerate(addresses):
+        mem.append(addr)
+        mem.append(data[i])
+
+    imsgs = []
+    omsgs = []
+
+    for _ in range(100):
+        # read a[0], read a[1], read a[2], read a[3]
+        imsgs.append(req('rd', 0, addresses[0], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[0]))
+        imsgs.append(req('rd', 0, addresses[1], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[1]))
+        imsgs.append(req('rd', 0, addresses[2], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[2]))
+        imsgs.append(req('rd', 0, addresses[3], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[3]))
+
+        # write b[0], write b[1], write b[2], write b[3]
+        imsgs.append(req('wr', 0, addresses[4], 0, data[4]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        imsgs.append(req('wr', 0, addresses[5], 0, data[5]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        imsgs.append(req('wr', 0, addresses[6], 0, data[6]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        imsgs.append(req('wr', 0, addresses[7], 0, data[7]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+
+    return [imsgs, omsgs, mem]
+
+#-------------------------------------------------------------------------
+# Pattern: loop10
+#-------------------------------------------------------------------------
+# Mixed spatial locality and temporal locality
+# for (i = 0; i < 100; i++) 
+#   read a[0], write b[0], read a[1], write b[1]   
+#   read a[2], write b[2], read a[3], write b[3]
+
+def loop10():
+
+    mem = []
+    data = [0xabcd1000, 0xabcd1004, 0xabcd1008, 0xabcd100c, 0xabcd2000, 0xabcd2004, 0xabcd2008, 0xabcd200c]
+    addresses = [0x1000, 0x1004, 0x1008, 0x100c, 0x2000, 0x2004, 0x2008, 0x200c]
+
+    for i, addr in enumerate(addresses):
+        mem.append(addr)
+        mem.append(data[i])
+
+    imsgs = []
+    omsgs = []
+
+    for _ in range(100):
+        # read a[0], write b[0]
+        imsgs.append(req('rd', 0, addresses[0], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[0]))
+        imsgs.append(req('wr', 0, addresses[4], 0, data[4]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        # read a[1], write b[1]
+        imsgs.append(req('rd', 0, addresses[1], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[1]))
+        imsgs.append(req('wr', 0, addresses[5], 0, data[5]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        # read a[2], write b[2]
+        imsgs.append(req('rd', 0, addresses[2], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[2]))
+        imsgs.append(req('wr', 0, addresses[6], 0, data[6]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        # read a[3], write b[3]
+        imsgs.append(req('rd', 0, addresses[3], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[3]))
+        imsgs.append(req('wr', 0, addresses[7], 0, data[7]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        
+    return [imsgs, omsgs, mem]
+
+#-------------------------------------------------------------------------
+# Pattern: loop11
+#-------------------------------------------------------------------------
+# Mixed spatial locality and temporal locality
+# for (i = 0; i < 100; i++) 
+#   read a[0], write b[0], read a[4], write b[4]   
+#   read a[8], write b[8], read [8], write b[8]
+
+def loop11():
+    
+    mem = []
+    data = [0x0000aaaa, 0x0000bbbb, 0x0000cccc, 0x0000dddd, 0x0000eeee, 0x0000ffff, 0x00001111, 0x00002222, 0x00003333]
+    addresses = [0x1000, 0x1010, 0x1020, 0x1030, 0x2000, 0x2010, 0x2020, 0x2030]
+
+    for i, addr in enumerate(addresses):
+        mem.append(addr)
+        mem.append(data[i])
+
+    imsgs = []
+    omsgs = []
+
+    for _ in range(100):
+        #  read a[0], write b[0]
+        imsgs.append(req('rd', 0, addresses[0], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[0]))
+        imsgs.append(req('wr', 0, addresses[4], 0, data[4]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        
+        #  read a[4], write b[4]
+        imsgs.append(req('rd', 0, addresses[1], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[1]))
+        imsgs.append(req('wr', 0, addresses[5], 0, data[5]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        
+        #  read a[8], write b[8]
+        imsgs.append(req('rd', 0, addresses[2], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[2]))
+        imsgs.append(req('wr', 0, addresses[6], 0, data[6]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+
+        #  read a[12], write b[12]
+        imsgs.append(req('rd', 0, addresses[3], 0, 0))
+        omsgs.append(resp('rd', 0, 0, 0, data[3]))
+        imsgs.append(req('wr', 0, addresses[7], 0, data[7]))
+        omsgs.append(resp('wr', 0, 0, 0, 0))
+        
+        
+    return [imsgs, omsgs, mem]
+
+
+#-------------------------------------------------------------------------
+# Pattern: loop12
+#-------------------------------------------------------------------------
+# random_stride
+# 1024B of random data
+
+def data_random():
+  seed(0xdeadbeef)
+  data = []
+  for i in range(256):
+    data.extend([0x00001000+i*4,randint(0,0xffffffff)])
+  return data
+
+# read a, write b = a + random number, write c = a * random number
+
+def random_fully_mixed_msgs():
+  imsgs = []
+  omsgs = []
+  data_array = data_random()
+  
+  for i in range(100):
+
+    # Choose a random index
+    idx = randint(0, 256)
+
+    # Create address and data
+    addr = 0x00001000 + idx * 4
+    data = data_array[idx*2+1]
+    data_update = data
+
+    # Randomly choose between 'rd' and 'wr'
+    if randint(0,1) == 0:
+        req_type = 'rd'
+    else:
+        req_type = 'wr'
+
+    # Generate req and resp messages based on the choice
+    if req_type == 'rd':
+      imsgs.append(req('rd', i,   addr,  0,  0 )) 
+      omsgs.append(resp('rd', i,   0,   0,  data ))
+    else:
+      imsgs.append(req('wr', i,   addr,  0,  data_update ))
+      omsgs.append(resp('wr', i,   0,   0,  0    ))
+
+      # update the data in data_array to reflect the write
+      data_array[idx*2] = addr
+      data_array[idx*2 + 1] = data_update
+      
+  return [imsgs, omsgs, data_array]
+
+#-------------------------------------------------------------------------
+# Main
+#-------------------------------------------------------------------------
+
+def main():
+  opts = parse_cmdline()
+
+  # Determine which model to use in the simulator
+
+  impl_dict = {
+    'fl'   : CacheFL,
+    'base' : CacheBase,
+    'alt'  : CacheAlt,
+  }
+
+  # Determine which pattern to use and create the pattern
+
+  input_dict = {
+    'loop1' : loop1,
+    'loop2' : loop2,
+    'loop3' : loop3,
+    'loop4' : loop4,
+    'loop5' : loop5,
+    'loop6' : loop6,
+    'loop7' : loop7,
+    'loop8' : loop8,
+    'loop9' : loop9,
+    'loop10': loop10,
+    'loop11': loop11,
+    'loop12': random_fully_mixed_msgs,
+
+  }
+
+  [ imsgs, omsgs, mem ] = input_dict[ opts.input ]()
+
+  # Create VCD filename
+
+  dump_vcd = ""
+  if opts.dump_vcd:
+    dump_vcd = "mem-{}-{}.vcd".format( opts.impl, opts.input )
+
+  # Instantiate and elaborate the model
+
+  th = TestHarness( impl_dict[ opts.impl ](), cmp_wo_test_field )
+
+  th.set_param( "top.src.construct",  msgs=imsgs )
+  th.set_param( "top.sink.construct", msgs=omsgs )
+  th.set_param( "top.mem.construct",  extra_latency=opts.mem_lat )
+
+  th.elaborate()
+
+  th.load( mem[::2], mem[1::2] )
+
+  # Create VCD filename
+
+  unique_name = f"mem-{opts.impl}-{opts.input}"
+
+  cmdline_opts = {
+    'dump_vcd': f"{unique_name}" if opts.dump_vcd else '',
+  }
+
+  # Configure the test harness component
+
+  config_model_with_cmdline_opts( th, cmdline_opts, duts=['cache'] )
+
+  # Apply necessary passes
+
+  th.apply( DefaultPassGroup( linetrace=opts.trace ) )
+
+  # Reset test harness
+
+  th.sim_reset()
+
+  # Run simulation
+
+  num_misses = 0
+  while not th.done():
+    th.sim_tick()
+
+    # count number of refill requests to find number of misses
+
+    if th.mem.ifc[0].reqstream.val and th.mem.ifc[0].reqstream.rdy:
+      if th.mem.ifc[0].reqstream.msg.type_ == 0:
+        num_misses += 1
+
+  # Add a couple extra ticks so that the VCD dump is nicer
+
+  th.sim_tick()
+  th.sim_tick()
+  th.sim_tick()
+
+  # Handle stats, redirect output to standard out or a file
+
+  if opts.stats:
+    num_requests = len(imsgs)
+    num_cycles   = th.sim_cycle_count()
+
+    print( f"num_cycles   = {num_cycles}" )
+    print( f"num_requests = {num_requests}" )
+    print( f"num_misses   = {num_misses}" )
+    print( f"miss_rate    = {num_misses/(1.0*num_requests):1.2f}" )
+    print( f"amal         = {num_cycles/(1.0*num_requests):1.2f}" )
+
+main()
