@@ -2,9 +2,9 @@
 
 🎓 **Cornell University - B.S. in Electrical & Computer Engineering '25**
 
-🔧 **Passionate about:** Embedded systems, VLSI design, machine learning, and sustainable technology
+🔧 **Passionate about:** Embedded systems, VLSI design, hardware verification, and sustainable technology
 
-🌱 **Currently exploring:** Digital/analog circuit design, microelectronics, and AI hardware acceleration
+🌱 **Currently exploring:** Digital circuit design, microelectronics, and AI hardware acceleration
 
 💼 **Experience:** Machine learning internship, sustainable tech startup founder, energy optimization research
 
